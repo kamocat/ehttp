@@ -10,6 +10,8 @@ that there was no reaction to my pull-requests).
 
 Main changes:
 
+  - **WebSocket protocol support (RFC 6455)** - enables real-time bidirectional
+    communication with web clients using the same non-blocking architecture
   - support serving static files (but not automatically below a given root)
   - support pre-compressed files (a request for `foo.html` will return
     the content of `foo.html.gz` instead if it exists).
@@ -85,6 +87,86 @@ to the [Adafruit circup guide](https://learn.adafruit.com/keep-your-circuitpytho
     circup install ehttpserver
 
 
+WebSocket Support
+-----------------
+
+Ehttpserver includes optional WebSocket protocol support (RFC 6455) via the
+`websocketserver` module, enabling real-time bidirectional communication 
+between CircuitPython devices and web clients.
+
+### WebSocket Features
+
+  - **Full RFC 6455 compliance**: Handles handshake, frame parsing, masking, 
+    and control frames (ping/pong/close)
+  - **Non-blocking I/O**: WebSocket connections use the same generator-based
+    non-blocking architecture as HTTP connections
+  - **Memory efficient**: Designed for microcontrollers with limited RAM
+  - **Easy to use**: Simple decorator-based routing similar to HTTP handlers
+  - **Modular design**: WebSocket functionality is in a separate module that
+    extends the base Server class
+
+### WebSocket Handler Example
+
+```python
+from ehttpserver import Response, route
+from websocketserver import WebSocketServer
+from websocketserver import WS_OPCODE_TEXT, WS_OPCODE_PING, WS_OPCODE_CLOSE
+
+class MyServer(WebSocketServer):
+  @route("/", "GET")
+  def serve_page(self, path, query_params, headers, body):
+    return Response("<h1>WebSocket Server</h1>", content_type="text/html")
+  
+  @route("/ws", "WEBSOCKET")
+  def handle_websocket(self, path, headers, ws):
+    """Echo server - sends back received messages"""
+    while not ws.closed:
+      # Receive a frame (non-blocking)
+      opcode, payload = None, None
+      for result in ws.recv_frame():
+        yield
+        if result:
+          opcode, payload = result
+      
+      if opcode == WS_OPCODE_TEXT:
+        message = payload.decode('utf-8')
+        yield from ws.send_text(f"Echo: {message}")
+      elif opcode == WS_OPCODE_PING:
+        yield from ws.send_pong(payload)
+      elif opcode == WS_OPCODE_CLOSE:
+        yield from ws.send_close()
+        break
+      
+      yield  # Allow other tasks to run
+```
+
+### WebSocket Methods
+
+  - `ws.send_text(text)` - Send a text message
+  - `ws.send_binary(data)` - Send binary data
+  - `ws.send_ping(payload)` - Send a ping frame
+  - `ws.send_pong(payload)` - Send a pong response
+  - `ws.send_close(code, reason)` - Close the connection
+  - `ws.recv_frame()` - Receive the next frame (returns opcode, payload)
+
+### WebSocket Constants
+
+The following opcode constants are exported from `websocketserver`:
+
+  - `WS_OPCODE_CONTINUATION` - Continuation frame (0x0)
+  - `WS_OPCODE_TEXT` - Text frame (0x1)
+  - `WS_OPCODE_BINARY` - Binary frame (0x2)
+  - `WS_OPCODE_CLOSE` - Close frame (0x8)
+  - `WS_OPCODE_PING` - Ping frame (0x9)
+  - `WS_OPCODE_PONG` - Pong frame (0xA)
+
+### Requirements
+
+WebSocket support requires the `hashlib` and `binascii` modules, which are
+included in standard CircuitPython builds. If your board doesn't include
+these, WebSocket connections will fail with a RuntimeError.
+
+
 Examples
 --------
 
@@ -95,6 +177,10 @@ The code in `examples/parallel_test.py` blinks the onboard-LED while
 serving requests. With other HTTP servers, blinking the LED while serving
 requests would either be impossible, or would become inconsistent when
 many HTTP requests are coming in.
+
+A WebSocket echo server example with a browser-based test page is in
+`examples/websocket_test.py`. This demonstrates real-time bidirectional
+communication between a web browser and the CircuitPython device.
 
 Note that CircuitPython's GC pauses may cause occasional longer pauses
 To mitigate this, run `import gc; gc.collect()` at regular, predictable
